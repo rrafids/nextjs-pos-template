@@ -1,17 +1,21 @@
 /** @type {import('next').NextConfig} */
-const repoName = "nextjs-pos-template";
-
 const nextConfig = {
-  reactStrictMode: true,
-  // Produce a fully static site
   output: "export",
-  // Required for GitHub project pages: prefix URLs with the repo name
-  basePath: `/${repoName}`,
-  assetPrefix: `/${repoName}/`,
   trailingSlash: true,
   images: {
-    unoptimized: true,
+    domains: ['raw.githubusercontent.com'],
+    unoptimized: true, // Disable Image Optimization
   },
-};
+  // webpack: (config, { isServer }) => {
+  //   if (isServer) {
+  //     // Ignore 'self' references for the server-side build
+  //     config.resolve.fallback = {
+  //       ...config.resolve.fallback,
+  //       self: false, // Avoid 'self' reference in server-side code
+  //     };
+  //   }
+  //   return config;
+  // },
+}
 
-export default nextConfig;
+module.exports = nextConfig
