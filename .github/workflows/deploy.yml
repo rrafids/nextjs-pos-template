@@ -1,180 +1,75 @@
-# Deploy Next.js site to GitHub Pages (handles Next 14+ export layouts, avoids symlinks)
-name: Deploy Next.js site to Pages 
-
-on:
-  push:
-    branches: ['github-pages']
-  workflow_dispatch:
-
-permissions:
-  contents: read
-  pages: write
-  id-token: write
-
-concurrency:
-  group: 'pages'
-  cancel-in-progress: false
-
-jobs:
-  build:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v3
-
-      - name: Detect package manager
-        id: detect-package-manager
-        run: |
-          if [ -f "${{ github.workspace }}/yarn.lock" ]; then
-            echo "manager=yarn" >> $GITHUB_OUTPUT
-            echo "command=install" >> $GITHUB_OUTPUT
-            echo "runner=yarn" >> $GITHUB_OUTPUT
-          elif [ -f "${{ github.workspace }}/package.json" ]; then
-            echo "manager=npm" >> $GITHUB_OUTPUT
-            echo "command=ci" >> $GITHUB_OUTPUT
-            echo "runner=npx --no-install" >> $GITHUB_OUTPUT
-          else
-            echo "Unable to determine package manager"
-            exit 1
-          fi
-
-      - name: Setup Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-          cache: ${{ steps.detect-package-manager.outputs.manager }}
-
-      - name: Setup Pages
-        uses: actions/configure-pages@v3
-        with:
-          static_site_generator: next
-
-      - name: Restore cache
-        uses: actions/cache@v3
-        with:
-          path: .next/cache
-          key: ${{ runner.os }}-nextjs-${{ hashFiles('**/package-lock.json', '**/yarn.lock') }}-${{ hashFiles('**.[jt]s', '**.[jt]sx') }}
-          restore-keys: |
-            ${{ runner.os }}-nextjs-${{ hashFiles('**/package-lock.json', '**/yarn.lock') }}-
-
-      - name: Install dependencies
-        run: ${{ steps.detect-package-manager.outputs.manager }} ${{ steps.detect-package-manager.outputs.command }}
-
-      - name: Build with Next.js
-        run: ${{ steps.detect-package-manager.outputs.runner }} next build
-
-      - name: Show .next top-level (debug)
-        run: |
-          echo "=== .next top-level ==="
-          [ -d .next ] && ls -la .next || echo ".next missing"
-          echo "=== .next/output (if any) ==="
-          [ -d .next/output ] && ls -la .next/output || echo ".next/output missing"
-
-      - name: Prepare artifact (create out/ if needed, dereference symlinks, ensure size)
+      - name: Prepare artifact (create out/ if needed, dereference symlinks into out_clean)
         run: |
           set -euo pipefail
           echo "Preparing export for GitHub Pages..."
 
-          # If out already exists (older setups), keep it
+          # Ensure out exists (move or assemble from .next)
           if [ -d "out" ]; then
-            echo "Found existing out/ directory - using it."
+            echo "Found existing out/"
           else
-            # Preferred Next 14+ location
             if [ -d ".next/output/export" ]; then
-              echo "Found .next/output/export -> moving to out/"
+              echo "Moving .next/output/export -> out"
               rm -rf out
               mv .next/output/export out
-            # Next builds often place static assets under .next/static and prerendered pages under .next/server/pages
             elif [ -d ".next/server/pages" ] || [ -d ".next/static" ]; then
-              echo "Found .next/server/pages or .next/static -> assembling out/ from .next"
+              echo "Assembling out/ from .next"
               rm -rf out
               mkdir -p out
-
-              # copy static runtime assets to out/_next if present and dereference symlinks (cp -aL)
               if [ -d ".next/static" ]; then
                 mkdir -p out/_next
                 cp -aL .next/static/. out/_next/ || true
               fi
-
-              # copy prerendered pages (HTML) if present, dereferencing symlinks
               if [ -d ".next/server/pages" ]; then
-                echo "Copying prerendered pages from .next/server/pages -> out/"
                 cp -aL .next/server/pages/. out/ || true
-              fi
-
-              # Some builds put pages under .next/server (not nested pages)
-              if [ -d ".next/server" ] && [ ! -d ".next/server/pages" ]; then
-                echo "Copying .next/server/* -> out/"
+              elif [ -d ".next/server" ]; then
                 cp -aL .next/server/. out/ || true
               fi
-
-              # Copy public/ into out/ so static public assets are included
               if [ -d "public" ]; then
-                echo "Copying public/ -> out/"
                 cp -aL public/. out/ || true
               fi
             else
-              echo "No export output found (.next/output/export or .next/server/pages or .next/static)."
-              echo "Listing .next for debugging:"
-              [ -d ".next" ] && ls -la .next | sed -n '1,200p' || echo ".next not present"
-              echo "Make sure next.config.mjs contains output: \"export\" (for static export), or adjust this workflow to match your build output."
+              echo "ERROR: no export output found (.next/output/export or .next/server/pages or .next/static)."
+              ls -la .next || true
               exit 1
             fi
           fi
 
-          # At this point 'out' should exist. Remove any symbolic links (Pages rejects symlinks/hard links).
-          echo "Removing any symlinks under out/ (GitHub Pages rejects symlinks)."
-          SYMLINKS=$(find out -type l || true)
+          # Make a fully dereferenced copy (follow symlinks) into out_clean
+          rm -rf out_clean
+          mkdir -p out_clean
+          echo "Creating dereferenced copy into out_clean (rsync -aL)..."
+          # -a: archive, -L: transform symlink into referent file
+          rsync -aL --delete out/ out_clean/
+
+          # Verify no symlinks remain
+          echo "Checking for symlinks in out_clean:"
+          SYMLINKS=$(find out_clean -type l || true)
           if [ -n "$SYMLINKS" ]; then
-            echo "Found symlinks:"
-            find out -type l -print
-            # For each symlink, replace it with the target file content if target exists, otherwise remove it.
-            find out -type l -print0 | while IFS= read -r -d '' LNK; do
-              TARGET=$(readlink "$LNK")
-              # If target is absolute or relative path inside out, try to resolve it
-              if [ -f "$LNK" ]; then
-                # readlink returned path; try to copy dereferenced content
-                echo "Attempting to dereference and replace $LNK"
-                cp -L "$LNK" "${LNK}.tmp" && mv "${LNK}.tmp" "$LNK" || rm -f "$LNK"
-              else
-                echo "Cannot dereference $LNK; removing"
-                rm -f "$LNK"
-              fi
-            done
+            echo "ERROR: symlinks still found in out_clean:"
+            find out_clean -type l -print
+            exit 1
           else
-            echo "No symlinks found under out/"
+            echo "No symlinks found in out_clean"
           fi
 
-          # Ensure total artifact size is reasonable (<10GB). Fail early if too large.
-          SIZE_BYTES=$(du -sb out | cut -f1)
-          echo "out/ size (bytes): $SIZE_BYTES"
-          # 10GB = 10737418240 bytes; set a safety limit slightly below
-          MAX=$((1024*1024*1024*9)) # 9GB
+          # Verify size under 9GB safety threshold
+          SIZE_BYTES=$(du -sb out_clean | cut -f1)
+          echo "out_clean size (bytes): $SIZE_BYTES"
+          MAX=$((1024*1024*1024*9))
           if [ "$SIZE_BYTES" -ge "$MAX" ]; then
-            echo "ERROR: out/ is too large ($SIZE_BYTES bytes). GitHub Pages rejects artifacts >= 10GB."
+            echo "ERROR: out_clean too large ($SIZE_BYTES bytes)"
             exit 1
           fi
 
-          # Ensure GitHub Pages will serve files that start with an underscore
-          touch out/.nojekyll
-          echo "Prepared out/ for upload. Top-level:"
-          ls -la out | sed -n '1,200p'
+          # Ensure Pages won't ignore underscored files
+          touch out_clean/.nojekyll
 
-      - name: Upload artifact
+          echo "out_clean top-level:"
+          ls -la out_clean | sed -n '1,200p'
+
+      - name: Upload artifact (upload out_clean)
         uses: actions/upload-artifact@v4
         with:
           name: github-pages
-          path: out
+          path: out_clean
           compression-level: 9
-
-  deploy:
-    runs-on: ubuntu-latest
-    needs: build
-    environment:
-      name: github-pages
-    steps:
-      - name: Deploy to GitHub Pages
-        id: deployment
-        uses: actions/deploy-pages@v4
-        with:
-          artifact_name: github-pages
