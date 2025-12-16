@@ -1,5 +1,5 @@
 # Deploy Next.js site to GitHub Pages (handles Next 14+ export layouts, avoids symlinks)
-name: Deploy Next.js site to Pages
+name: Deploy Next.js site to Pages 
 
 on:
   push:
