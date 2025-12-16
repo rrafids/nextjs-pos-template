@@ -7,6 +7,7 @@
     "build": "next build",
     "start": "next start",
     "preview": "next start -p 3000",
+    "export": "next build && next export",
     "predeploy": "cross-env NEXT_PUBLIC_REPO_NAME=nextjs-pos-template npm run build",
     "deploy": "gh-pages -d out"
   },
