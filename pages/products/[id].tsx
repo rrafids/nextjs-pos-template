@@ -1,9 +1,9 @@
 import { useRouter } from "next/router";
 import Link from "next/link";
-import PageShell from "../../../components/PageShell";
-import ProductForm from "../../../components/ProductForm";
-import { useRequireAuth } from "../../../context/AuthContext";
-import { useInventory } from "../../../context/InventoryContext";
+import PageShell from "../../components/PageShell";
+import ProductForm from "../../components/ProductForm";
+import { useRequireAuth } from "../../context/AuthContext";
+import { useInventory } from "../../context/InventoryContext";
 
 export default function EditProductPage() {
   const { authReady, token } = useRequireAuth();
