@@ -1,9 +1,9 @@
-# Deploy Next.js site to GitHub Pages (handles Next 14+ output; uses upload-pages-artifact)
+# Deploy Next.js site to GitHub Pages (handles Next 14+ export layouts)
 name: Deploy Next.js site to Pages
 
 on:
   push:
-    branches: ['github-pages']   # adjust to the branch you want to trigger from
+    branches: ['main']
   workflow_dispatch:
 
 permissions:
@@ -49,6 +49,14 @@ jobs:
         with:
           static_site_generator: next
 
+      - name: Restore cache
+        uses: actions/cache@v3
+        with:
+          path: .next/cache
+          key: ${{ runner.os }}-nextjs-${{ hashFiles('**/package-lock.json', '**/yarn.lock') }}-${{ hashFiles('**.[jt]s', '**.[jt]sx') }}
+          restore-keys: |
+            ${{ runner.os }}-nextjs-${{ hashFiles('**/package-lock.json', '**/yarn.lock') }}-
+
       - name: Install dependencies
         run: ${{ steps.detect-package-manager.outputs.manager }} ${{ steps.detect-package-manager.outputs.command }}
 
@@ -62,93 +70,99 @@ jobs:
           echo "=== .next/output (if any) ==="
           [ -d .next/output ] && ls -la .next/output || echo ".next/output missing"
 
-      - name: Prepare artifact (assemble export and dereference symlinks into out_clean)
+      - name: Prepare artifact (create out/ if needed and .nojekyll)
         run: |
-          set -euo pipefail
           echo "Preparing export for GitHub Pages..."
 
-          # Create 'out' from common Next output locations if needed
+          # If out already exists (older setups), keep it
           if [ -d "out" ]; then
-            echo "Found existing out/ - using it."
+            echo "Found existing out/ directory - using it."
           else
+            # Preferred: Next 14+ export location
             if [ -d ".next/output/export" ]; then
-              echo "Moving .next/output/export -> out/"
+              echo "Found .next/output/export -> moving to out/"
               rm -rf out
               mv .next/output/export out
-            elif [ -d ".next/static" ] || [ -d ".next/server/pages" ] || [ -d ".next/server" ]; then
-              echo "Assembling out/ from .next (static + prerendered pages)"
+            # Next builds often place static assets under .next/static and prerendered pages under .next/server/pages
+            elif [ -d ".next/server/pages" ] || [ -d ".next/static" ]; then
+              echo "Found .next/server/pages or .next/static -> assembling out/ from .next"
               rm -rf out
               mkdir -p out
+
+              # copy static runtime assets to out/_next if present
               if [ -d ".next/static" ]; then
                 mkdir -p out/_next
-                cp -aL .next/static/. out/_next/ || true
+                cp -a .next/static/* out/_next/ || true
               fi
+
+              # copy prerendered pages (HTML) if present
               if [ -d ".next/server/pages" ]; then
-                cp -aL .next/server/pages/. out/ || true
-              elif [ -d ".next/server" ]; then
-                cp -aL .next/server/. out/ || true
+                echo "Copying prerendered pages from .next/server/pages -> out/"
+                # Use rsync-like behavior to preserve structure
+                cp -a .next/server/pages/. out/ || true
               fi
+
+              # Some builds put pages under .next/server (not nested pages)
+              if [ -d ".next/server" ] && [ ! -d ".next/server/pages" ]; then
+                echo "Copying .next/server/* -> out/"
+                cp -a .next/server/* out/ || true
+              fi
+
+              # Copy public/ into out/ so static public assets are included
               if [ -d "public" ]; then
-                cp -aL public/. out/ || true
+                echo "Copying public/ -> out/"
+                cp -a public/. out/ || true
               fi
             else
-              echo "ERROR: no export output found (.next/output/export or .next/static or .next/server)."
-              ls -la .next || true
+              echo "No export output found (.next/output/export or .next/server/pages or .next/static)."
+              echo "Listing .next for debugging:"
+              [ -d ".next" ] && ls -la .next | sed -n '1,200p' || echo ".next not present"
+              echo "Make sure next.config.mjs contains output: \"export\" (for static export), or adjust this workflow to match your build output."
               exit 1
             fi
           fi
 
-          # Create a fully dereferenced copy using rsync -aL into out_clean
-          rm -rf out_clean
-          mkdir -p out_clean
-          echo "Creating dereferenced copy into out_clean (rsync -aL)..."
-          rsync -aL --delete out/ out_clean/
-
-          # If the build produced a single repo-named subfolder (project page), optionally unwrap it.
-          # Uncomment and set REPO_DIR if you need to unwrap:
-          # REPO_DIR="nextjs-pos-template"
-          # if [ -d "out_clean/$REPO_DIR" ] && [ "$(ls -A out_clean | wc -l)" -eq 1 ]; then
-          #   echo "Unwrapping $REPO_DIR into out_clean root..."
-          #   mv out_clean/$REPO_DIR/* out_clean/
-          #   rmdir out_clean/$REPO_DIR
+          # If you used basePath in next.config.mjs (e.g. basePath: '/nextjs-pos-template')
+          # the built files may already be nested inside out/<basePath>/; if your HTML still 404s,
+          # you may need to wrap the out content into out/<repo-name> to match the URLs GitHub Pages serves.
+          #
+          # Uncomment and adapt the block below ONLY if you need to force-wrap into a repo subfolder:
+          #
+          # REPO_FOLDER="nextjs-pos-template"
+          # if [ ! -d "out/$REPO_FOLDER" ]; then
+          #   echo "Wrapping out content into out/$REPO_FOLDER (project page) ..."
+          #   mkdir -p out/$REPO_FOLDER
+          #   shopt -s dotglob || true
+          #   for f in out/*; do
+          #     if [ "$f" = "out/$REPO_FOLDER" ]; then
+          #       continue
+          #     fi
+          #     mv "$f" out/$REPO_FOLDER/ || true
+          #   done
           # fi
 
-          # Verify no symlinks remain in out_clean
-          echo "Checking for symlinks in out_clean:"
-          SYMLINKS_COUNT=$(find out_clean -type l | wc -l || true)
-          if [ "$SYMLINKS_COUNT" -ne "0" ]; then
-            echo "ERROR: Found $SYMLINKS_COUNT symlink(s) in out_clean:"
-            find out_clean -type l -print
-            exit 1
-          else
-            echo "No symlinks found in out_clean"
-          fi
+          # Ensure GitHub Pages will serve files that start with an underscore
+          touch out/.nojekyll
+          echo "Prepared out/ for upload. Top-level:"
+          ls -la out | sed -n '1,200p'
+          echo "If your site expects files under a repo subpath (/nextjs-pos-template/...), ensure basePath in next.config.mjs is correct or enable the wrapping block."
 
-          # Safety size check
-          SIZE_BYTES=$(du -sb out_clean | cut -f1)
-          echo "out_clean size (bytes): $SIZE_BYTES"
-          MAX=$((1024*1024*1024*9))
-          if [ "$SIZE_BYTES" -ge "$MAX" ]; then
-            echo "ERROR: out_clean is too large ($SIZE_BYTES bytes). Aborting."
-            exit 1
-          fi
-
-          # Ensure Pages won't ignore underscored files
-          touch out_clean/.nojekyll
-          echo "out_clean top-level:"
-          ls -la out_clean | sed -n '1,200p'
-
-      - name: Upload artifact (use upload-pages-artifact)
+      - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          path: out_clean
+          name: github-pages
+          path: out
+          compression-level: 9
 
   deploy:
-    needs: build
-    runs-on: ubuntu-latest
     environment:
-      name: github-pages   # ensure this environment exists and allows deployments from your trigger branch
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    needs: build
     steps:
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
+        with:
+          artifact_name: github-pages
