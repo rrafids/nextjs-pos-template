@@ -20,6 +20,7 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v3
+
       - name: Detect package manager
         id: detect-package-manager
         run: |
@@ -35,15 +36,18 @@ jobs:
             echo "Unable to determine package manager"
             exit 1
           fi
+
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
           node-version: '20'
           cache: ${{ steps.detect-package-manager.outputs.manager }}
+
       - name: Setup Pages
         uses: actions/configure-pages@v3
         with:
           static_site_generator: next
+
       - name: Restore cache
         uses: actions/cache@v3
         with:
@@ -51,19 +55,84 @@ jobs:
           key: ${{ runner.os }}-nextjs-${{ hashFiles('**/package-lock.json', '**/yarn.lock') }}-${{ hashFiles('**.[jt]s', '**.[jt]sx') }}
           restore-keys: |
             ${{ runner.os }}-nextjs-${{ hashFiles('**/package-lock.json', '**/yarn.lock') }}-
+
       - name: Install dependencies
         run: ${{ steps.detect-package-manager.outputs.manager }} ${{ steps.detect-package-manager.outputs.command }}
+
       - name: Build with Next.js
         run: ${{ steps.detect-package-manager.outputs.runner }} next build
-      - name: Prepare artifact
+
+      - name: Show .next/output (debug)
         run: |
-          # Create .nojekyll file
+          echo "=== .next top-level ==="
+          [ -d .next ] && ls -la .next || echo ".next missing"
+          echo "=== .next/output ==="
+          [ -d .next/output ] && ls -la .next/output || echo ".next/output missing"
+          echo "=== .next/output/export (if present) ==="
+          [ -d .next/output/export ] && ls -la .next/output/export | sed -n '1,200p' || echo ".next/output/export missing"
+
+      - name: Prepare artifact (create out/ if needed and .nojekyll)
+        run: |
+          echo "Preparing export for GitHub Pages..."
+          # If out already exists, use it.
+          if [ -d "out" ]; then
+            echo "Found out/ - using it"
+          else
+            # Preferred Next 14+ location
+            if [ -d ".next/output/export" ]; then
+              echo "Found .next/output/export -> moving to out/"
+              rm -rf out
+              mv .next/output/export out
+            # Sometimes static assets are in .next/output/static and pages in server pages
+            elif [ -d ".next/output/static" ]; then
+              echo "Found .next/output/static -> assembling out/"
+              rm -rf out
+              mkdir -p out
+              # copy static assets to out/_next
+              cp -a .next/output/static out/_next || true
+              # copy HTML pages (if present) from server pages (or server/chunks)
+              if [ -d ".next/output/server/pages" ]; then
+                cp -a .next/output/server/pages/* out/ || true
+              elif [ -d ".next/output/server" ]; then
+                cp -a .next/output/server/* out/ || true
+              fi
+            else
+              # Fallback: show debugging info and fail
+              echo "No export folder found (.next/output/export or .next/output/static). Listing .next for debugging:"
+              [ -d ".next" ] && ls -la .next | sed -n '1,200p' || echo ".next not present"
+              echo "Listing repo root:"
+              ls -la
+              echo "Make sure next.config.mjs contains output: \"export\" and the build step produced an export."
+              exit 1
+            fi
+          fi
+
+          # If the repo is served as a project page (e.g. /<repo>/...), ensure the files are in out/<repo>/.
+          # If you hardcoded basePath in next.config.mjs to "/nextjs-pos-template" then .next/output/export
+          # should already contain a folder for that base path. If not, and your HTML expects /nextjs-pos-template/...,
+          # you can wrap the build into that folder here. (Commented out by default.)
+          #
+          # REASON: Usually not required if next.config.mjs basePath/assetPrefix is correct.
+          #
+          # Uncomment and adapt if you need to move files under out/nextjs-pos-template:
+          # if [ ! -d "out/nextjs-pos-template" ]; then
+          #   echo "Wrapping out content into out/nextjs-pos-template (if required by Pages)..."
+          #   mkdir -p out/nextjs-pos-template
+          #   shopt -s dotglob || true
+          #   for f in out/*; do
+          #     if [ "$f" = "out/nextjs-pos-template" ]; then
+          #       continue
+          #     fi
+          #     mv "$f" out/nextjs-pos-template/ || true
+          #   done
+          # fi
+
+          # Ensure GitHub Pages will serve files that start with underscore
           touch out/.nojekyll
-          # Show directory contents and size
-          echo "Directory contents:"
-          ls -la out/
-          echo "Total size:"
-          du -sh out/
+          echo "Prepared out/ for upload. Contents (top-level):"
+          ls -la out | sed -n '1,200p'
+          echo "If you expected a subfolder (eg out/nextjs-pos-template), ensure basePath in next.config.mjs matches your repo name."
+
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
