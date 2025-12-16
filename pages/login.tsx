@@ -9,7 +9,7 @@ export default function LoginPage() {
 
   useEffect(() => {
     if (authReady && token) {
-      router.replace("/inventory").catch(() => {});
+      router.replace("/products").catch(() => {});
     }
   }, [authReady, token, router]);
 
@@ -19,16 +19,19 @@ export default function LoginPage() {
   };
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-gray-50 px-4">
-      <div className="w-full max-w-md rounded-lg border bg-white p-6 shadow">
-        <h1 className="mb-4 text-center text-2xl font-semibold text-gray-900">POS Login</h1>
-        <p className="mb-6 text-center text-sm text-gray-600">Dummy login, no password required.</p>
+    <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-slate-950 via-slate-900 to-slate-800 px-4">
+      <div className="card w-full max-w-md border-slate-800/60 bg-slate-900 text-slate-50 shadow-xl shadow-indigo-500/10">
+        <h1 className="mb-2 text-center text-2xl font-semibold text-white">Cuslabs POS</h1>
+        <p className="mb-6 text-center text-sm text-slate-300">Login to continue</p>
         <form className="space-y-4" onSubmit={onSubmit}>
           <div>
-            <label className="mb-1 block text-sm font-medium text-gray-700">Name (optional)</label>
-            <input placeholder="Cashier name" value={name} onChange={(e) => setName(e.target.value)} />
+            <label className="mb-1 block text-sm font-medium text-slate-200">Name</label>
+            <input placeholder="Name" value={name} onChange={(e) => setName(e.target.value)} />
           </div>
-          <button type="submit" className="w-full rounded bg-blue-600 px-4 py-2 text-white hover:bg-blue-700">
+          <button
+            type="submit"
+            className="w-full rounded-lg bg-indigo-600 px-4 py-2 text-white shadow-sm transition hover:bg-indigo-700"
+          >
             Enter
           </button>
         </form>

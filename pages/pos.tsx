@@ -34,13 +34,13 @@ export default function PosPage() {
   return (
     <PageShell>
       <div className="mb-4">
-        <h1 className="text-2xl font-semibold text-gray-900">Point of Sale</h1>
-        <p className="text-sm text-gray-600">Quick sell flow updates stock.</p>
+        <h1 className="page-title">Point of Sale</h1>
+        <p className="page-subtitle">Quick sell flow updates stock.</p>
       </div>
 
-      <form onSubmit={handleSubmit} className="space-y-4 rounded-lg border bg-white p-5 shadow-sm max-w-xl">
+      <form onSubmit={handleSubmit} className="card max-w-xl space-y-4">
         <div>
-          <label className="mb-1 block text-sm font-medium text-gray-700">Product</label>
+          <label className="mb-1 block text-sm font-medium text-slate-700">Product</label>
           <select value={productId} onChange={(e) => setProductId(e.target.value)}>
             <option value="">Select a product</option>
             {products.map((p) => (
@@ -51,17 +51,17 @@ export default function PosPage() {
           </select>
         </div>
         <div>
-          <label className="mb-1 block text-sm font-medium text-gray-700">Quantity</label>
+          <label className="mb-1 block text-sm font-medium text-slate-700">Quantity</label>
           <input type="number" min="1" step="1" value={qty} onChange={(e) => setQty(e.target.value)} />
         </div>
         {selectedProduct && (
-          <p className="text-sm text-gray-600">
-            Price: ${selectedProduct.price.toFixed(2)} — Stock: {selectedProduct.stock}
+          <p className="text-sm text-slate-600">
+            Price: Rp {selectedProduct.price.toFixed(2)} — Stock: {selectedProduct.stock}
           </p>
         )}
-        {message && <p className="text-sm text-blue-700">{message}</p>}
+        {message && <p className="text-sm text-indigo-700">{message}</p>}
         <div className="flex justify-end">
-          <button type="submit" className="rounded bg-green-600 px-4 py-2 text-white hover:bg-green-700">
+          <button type="submit" className="rounded-lg bg-green-600 px-4 py-2 text-white shadow-sm hover:bg-green-700">
             Sell
           </button>
         </div>

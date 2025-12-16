@@ -31,7 +31,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (typeof window !== "undefined") {
       window.localStorage.setItem(STORAGE_KEY, value);
     }
-    router.push("/inventory").catch(() => {});
+    router.push("/products").catch(() => {});
   };
 
   const logout = () => {

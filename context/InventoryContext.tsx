@@ -29,11 +29,19 @@ export type SaleRecord = {
   timestamp: string;
 };
 
+export type PurchaseRecord = {
+  id: string;
+  productId: string;
+  quantity: number;
+  timestamp: string;
+};
+
 type InventoryState = {
   categories: Category[];
   subcategories: Subcategory[];
   products: Product[];
   sales: SaleRecord[];
+  purchases: PurchaseRecord[];
 };
 
 type InventoryContextValue = InventoryState & {
@@ -51,6 +59,7 @@ const defaultState: InventoryState = {
   subcategories: [],
   products: [],
   sales: [],
+  purchases: [],
 };
 
 const InventoryContext = createContext<InventoryContextValue | undefined>(undefined);
@@ -64,8 +73,15 @@ export function InventoryProvider({ children }: { children: ReactNode }) {
     const saved = window.localStorage.getItem(STORAGE_KEY);
     if (saved) {
       try {
-        const parsed = JSON.parse(saved) as InventoryState;
-        setState(parsed);
+        const parsed = JSON.parse(saved) as Partial<InventoryState>;
+        // Merge with defaults to ensure all fields exist (handles old localStorage data)
+        setState({
+          categories: parsed.categories ?? defaultState.categories,
+          subcategories: parsed.subcategories ?? defaultState.subcategories,
+          products: parsed.products ?? defaultState.products,
+          sales: parsed.sales ?? defaultState.sales,
+          purchases: parsed.purchases ?? defaultState.purchases,
+        });
       } catch {
         // ignore parse issues and start clean
       }
@@ -150,7 +166,7 @@ export function InventoryProvider({ children }: { children: ReactNode }) {
       products: prev.products.map((p) =>
         p.id === productId ? { ...p, stock: Math.max(0, p.stock - actualQty) } : p
       ),
-      sales: [sale, ...prev.sales],
+      sales: [sale, ...(prev.sales ?? [])],
     }));
     return { success: true };
   };
@@ -159,9 +175,16 @@ export function InventoryProvider({ children }: { children: ReactNode }) {
     if (quantity <= 0) return { success: false, message: "Quantity must be positive" };
     const product = state.products.find((p) => p.id === productId);
     if (!product) return { success: false, message: "Product not found" };
+    const purchaseRecord: PurchaseRecord = {
+      id: uuid(),
+      productId,
+      quantity,
+      timestamp: new Date().toISOString(),
+    };
     setState((prev) => ({
       ...prev,
       products: prev.products.map((p) => (p.id === productId ? { ...p, stock: p.stock + quantity } : p)),
+      purchases: [purchaseRecord, ...(prev.purchases ?? [])],
     }));
     return { success: true };
   };

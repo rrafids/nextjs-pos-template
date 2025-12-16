@@ -19,10 +19,10 @@ export default function EditProductPage() {
     <PageShell>
       <div className="mb-4 flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-semibold text-gray-900">Edit Product</h1>
-          <p className="text-sm text-gray-600">Update details and stock.</p>
+          <h1 className="page-title">Edit Product</h1>
+          <p className="page-subtitle">Update details and stock.</p>
         </div>
-        <Link className="text-sm text-blue-600 hover:underline" href="/inventory">
+        <Link className="text-sm text-indigo-600 hover:underline" href="/products">
           Back to list
         </Link>
       </div>

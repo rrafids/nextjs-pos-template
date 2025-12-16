@@ -24,10 +24,10 @@ export default function PurchaseForm() {
   };
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-3 rounded-lg border bg-white p-4 shadow-sm">
-      <h2 className="text-lg font-semibold text-gray-900">Purchase</h2>
+    <form onSubmit={handleSubmit} className="card space-y-4">
+      <h2 className="text-lg font-semibold text-slate-900">Purchase</h2>
       <div>
-        <label className="mb-1 block text-sm font-medium text-gray-700">Product</label>
+        <label className="mb-1 block text-sm font-medium text-slate-700">Product</label>
         <select value={productId} onChange={(e) => setProductId(e.target.value)}>
           <option value="">Select a product</option>
           {products.map((p) => (
@@ -38,12 +38,12 @@ export default function PurchaseForm() {
         </select>
       </div>
       <div>
-        <label className="mb-1 block text-sm font-medium text-gray-700">Quantity</label>
+        <label className="mb-1 block text-sm font-medium text-slate-700">Quantity</label>
         <input type="number" min="1" step="1" value={qty} onChange={(e) => setQty(e.target.value)} />
       </div>
-      {message && <p className="text-sm text-blue-700">{message}</p>}
+      {message && <p className="text-sm text-indigo-700">{message}</p>}
       <div className="flex justify-end">
-        <button type="submit" className="rounded bg-indigo-600 px-4 py-2 text-white hover:bg-indigo-700">
+        <button type="submit" className="rounded-lg bg-indigo-600 px-4 py-2 text-white shadow-sm hover:bg-indigo-700">
           Add Stock
         </button>
       </div>
