@@ -70,7 +70,7 @@ jobs:
           echo "=== .next/output (if any) ==="
           [ -d .next/output ] && ls -la .next/output || echo ".next/output missing"
 
-       - name: Prepare artifact (create out/ if needed, dereference symlinks into out_clean)
+      - name: Prepare artifact (create out/ if needed, dereference symlinks into out_clean)
         run: |
           set -euo pipefail
           echo "Preparing export for GitHub Pages..."
