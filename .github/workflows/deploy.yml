@@ -1,8 +1,9 @@
+# Deploy Next.js site to GitHub Pages (handles Next 14+ output; uses upload-pages-artifact)
 name: Deploy Next.js site to Pages
 
 on:
   push:
-    branches: ['github-pages']
+    branches: ['github-pages']   # adjust to the branch you want to trigger from
   workflow_dispatch:
 
 permissions:
@@ -20,6 +21,7 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v3
+
       - name: Detect package manager
         id: detect-package-manager
         run: |
@@ -35,51 +37,118 @@ jobs:
             echo "Unable to determine package manager"
             exit 1
           fi
+
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
           node-version: '20'
           cache: ${{ steps.detect-package-manager.outputs.manager }}
+
       - name: Setup Pages
         uses: actions/configure-pages@v3
         with:
           static_site_generator: next
-      - name: Restore cache
-        uses: actions/cache@v3
-        with:
-          path: .next/cache
-          key: ${{ runner.os }}-nextjs-${{ hashFiles('**/package-lock.json', '**/yarn.lock') }}-${{ hashFiles('**.[jt]s', '**.[jt]sx') }}
-          restore-keys: |
-            ${{ runner.os }}-nextjs-${{ hashFiles('**/package-lock.json', '**/yarn.lock') }}-
+
       - name: Install dependencies
         run: ${{ steps.detect-package-manager.outputs.manager }} ${{ steps.detect-package-manager.outputs.command }}
+
       - name: Build with Next.js
         run: ${{ steps.detect-package-manager.outputs.runner }} next build
-      - name: Prepare artifact
+
+      - name: Show .next top-level (debug)
         run: |
-          # Create .nojekyll file
-          touch out/.nojekyll
-          # Show directory contents and size
-          echo "Directory contents:"
-          ls -la out/
-          echo "Total size:"
-          du -sh out/
-      - name: Upload artifact
+          echo "=== .next top-level ==="
+          [ -d .next ] && ls -la .next || echo ".next missing"
+          echo "=== .next/output (if any) ==="
+          [ -d .next/output ] && ls -la .next/output || echo ".next/output missing"
+
+      - name: Prepare artifact (assemble export and dereference symlinks into out_clean)
+        run: |
+          set -euo pipefail
+          echo "Preparing export for GitHub Pages..."
+
+          # Create 'out' from common Next output locations if needed
+          if [ -d "out" ]; then
+            echo "Found existing out/ - using it."
+          else
+            if [ -d ".next/output/export" ]; then
+              echo "Moving .next/output/export -> out/"
+              rm -rf out
+              mv .next/output/export out
+            elif [ -d ".next/static" ] || [ -d ".next/server/pages" ] || [ -d ".next/server" ]; then
+              echo "Assembling out/ from .next (static + prerendered pages)"
+              rm -rf out
+              mkdir -p out
+              if [ -d ".next/static" ]; then
+                mkdir -p out/_next
+                cp -aL .next/static/. out/_next/ || true
+              fi
+              if [ -d ".next/server/pages" ]; then
+                cp -aL .next/server/pages/. out/ || true
+              elif [ -d ".next/server" ]; then
+                cp -aL .next/server/. out/ || true
+              fi
+              if [ -d "public" ]; then
+                cp -aL public/. out/ || true
+              fi
+            else
+              echo "ERROR: no export output found (.next/output/export or .next/static or .next/server)."
+              ls -la .next || true
+              exit 1
+            fi
+          fi
+
+          # Create a fully dereferenced copy using rsync -aL into out_clean
+          rm -rf out_clean
+          mkdir -p out_clean
+          echo "Creating dereferenced copy into out_clean (rsync -aL)..."
+          rsync -aL --delete out/ out_clean/
+
+          # If the build produced a single repo-named subfolder (project page), optionally unwrap it.
+          # Uncomment and set REPO_DIR if you need to unwrap:
+          # REPO_DIR="nextjs-pos-template"
+          # if [ -d "out_clean/$REPO_DIR" ] && [ "$(ls -A out_clean | wc -l)" -eq 1 ]; then
+          #   echo "Unwrapping $REPO_DIR into out_clean root..."
+          #   mv out_clean/$REPO_DIR/* out_clean/
+          #   rmdir out_clean/$REPO_DIR
+          # fi
+
+          # Verify no symlinks remain in out_clean
+          echo "Checking for symlinks in out_clean:"
+          SYMLINKS_COUNT=$(find out_clean -type l | wc -l || true)
+          if [ "$SYMLINKS_COUNT" -ne "0" ]; then
+            echo "ERROR: Found $SYMLINKS_COUNT symlink(s) in out_clean:"
+            find out_clean -type l -print
+            exit 1
+          else
+            echo "No symlinks found in out_clean"
+          fi
+
+          # Safety size check
+          SIZE_BYTES=$(du -sb out_clean | cut -f1)
+          echo "out_clean size (bytes): $SIZE_BYTES"
+          MAX=$((1024*1024*1024*9))
+          if [ "$SIZE_BYTES" -ge "$MAX" ]; then
+            echo "ERROR: out_clean is too large ($SIZE_BYTES bytes). Aborting."
+            exit 1
+          fi
+
+          # Ensure Pages won't ignore underscored files
+          touch out_clean/.nojekyll
+          echo "out_clean top-level:"
+          ls -la out_clean | sed -n '1,200p'
+
+      - name: Upload artifact (use upload-pages-artifact)
         uses: actions/upload-pages-artifact@v3
         with:
-          name: github-pages
-          path: out
-          compression-level: 9
+          path: out_clean
 
   deploy:
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    runs-on: ubuntu-latest
     needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages   # ensure this environment exists and allows deployments from your trigger branch
     steps:
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
-        with:
-          artifact_name: github-pages
