@@ -1,3 +1,4 @@
+# Deploy Next.js site to GitHub Pages (handles Next 14+ export layouts)
 name: Deploy Next.js site to Pages
 
 on:
@@ -62,76 +63,89 @@ jobs:
       - name: Build with Next.js
         run: ${{ steps.detect-package-manager.outputs.runner }} next build
 
-      - name: Show .next/output (debug)
+      - name: Show .next top-level (debug)
         run: |
           echo "=== .next top-level ==="
           [ -d .next ] && ls -la .next || echo ".next missing"
-          echo "=== .next/output ==="
+          echo "=== .next/output (if any) ==="
           [ -d .next/output ] && ls -la .next/output || echo ".next/output missing"
-          echo "=== .next/output/export (if present) ==="
-          [ -d .next/output/export ] && ls -la .next/output/export | sed -n '1,200p' || echo ".next/output/export missing"
 
       - name: Prepare artifact (create out/ if needed and .nojekyll)
         run: |
           echo "Preparing export for GitHub Pages..."
-          # If out already exists, use it.
+
+          # If out already exists (older setups), keep it
           if [ -d "out" ]; then
-            echo "Found out/ - using it"
+            echo "Found existing out/ directory - using it."
           else
-            # Preferred Next 14+ location
+            # Preferred: Next 14+ export location
             if [ -d ".next/output/export" ]; then
               echo "Found .next/output/export -> moving to out/"
               rm -rf out
               mv .next/output/export out
-            # Sometimes static assets are in .next/output/static and pages in server pages
-            elif [ -d ".next/output/static" ]; then
-              echo "Found .next/output/static -> assembling out/"
+            # Next builds often place static assets under .next/static and prerendered pages under .next/server/pages
+            elif [ -d ".next/server/pages" ] || [ -d ".next/static" ]; then
+              echo "Found .next/server/pages or .next/static -> assembling out/ from .next"
               rm -rf out
               mkdir -p out
-              # copy static assets to out/_next
-              cp -a .next/output/static out/_next || true
-              # copy HTML pages (if present) from server pages (or server/chunks)
-              if [ -d ".next/output/server/pages" ]; then
-                cp -a .next/output/server/pages/* out/ || true
-              elif [ -d ".next/output/server" ]; then
-                cp -a .next/output/server/* out/ || true
+
+              # copy static runtime assets to out/_next if present
+              if [ -d ".next/static" ]; then
+                mkdir -p out/_next
+                cp -a .next/static/* out/_next/ || true
+              fi
+
+              # copy prerendered pages (HTML) if present
+              if [ -d ".next/server/pages" ]; then
+                echo "Copying prerendered pages from .next/server/pages -> out/"
+                # Use rsync-like behavior to preserve structure
+                cp -a .next/server/pages/. out/ || true
+              fi
+
+              # Some builds put pages under .next/server (not nested pages)
+              if [ -d ".next/server" ] && [ ! -d ".next/server/pages" ]; then
+                echo "Copying .next/server/* -> out/"
+                cp -a .next/server/* out/ || true
+              fi
+
+              # Copy public/ into out/ so static public assets are included
+              if [ -d "public" ]; then
+                echo "Copying public/ -> out/"
+                cp -a public/. out/ || true
               fi
             else
-              # Fallback: show debugging info and fail
-              echo "No export folder found (.next/output/export or .next/output/static). Listing .next for debugging:"
+              echo "No export output found (.next/output/export or .next/server/pages or .next/static)."
+              echo "Listing .next for debugging:"
               [ -d ".next" ] && ls -la .next | sed -n '1,200p' || echo ".next not present"
-              echo "Listing repo root:"
-              ls -la
-              echo "Make sure next.config.mjs contains output: \"export\" and the build step produced an export."
+              echo "Make sure next.config.mjs contains output: \"export\" (for static export), or adjust this workflow to match your build output."
               exit 1
             fi
           fi
 
-          # If the repo is served as a project page (e.g. /<repo>/...), ensure the files are in out/<repo>/.
-          # If you hardcoded basePath in next.config.mjs to "/nextjs-pos-template" then .next/output/export
-          # should already contain a folder for that base path. If not, and your HTML expects /nextjs-pos-template/...,
-          # you can wrap the build into that folder here. (Commented out by default.)
+          # If you used basePath in next.config.mjs (e.g. basePath: '/nextjs-pos-template')
+          # the built files may already be nested inside out/<basePath>/; if your HTML still 404s,
+          # you may need to wrap the out content into out/<repo-name> to match the URLs GitHub Pages serves.
           #
-          # REASON: Usually not required if next.config.mjs basePath/assetPrefix is correct.
+          # Uncomment and adapt the block below ONLY if you need to force-wrap into a repo subfolder:
           #
-          # Uncomment and adapt if you need to move files under out/nextjs-pos-template:
-          # if [ ! -d "out/nextjs-pos-template" ]; then
-          #   echo "Wrapping out content into out/nextjs-pos-template (if required by Pages)..."
-          #   mkdir -p out/nextjs-pos-template
+          # REPO_FOLDER="nextjs-pos-template"
+          # if [ ! -d "out/$REPO_FOLDER" ]; then
+          #   echo "Wrapping out content into out/$REPO_FOLDER (project page) ..."
+          #   mkdir -p out/$REPO_FOLDER
           #   shopt -s dotglob || true
           #   for f in out/*; do
-          #     if [ "$f" = "out/nextjs-pos-template" ]; then
+          #     if [ "$f" = "out/$REPO_FOLDER" ]; then
           #       continue
           #     fi
-          #     mv "$f" out/nextjs-pos-template/ || true
+          #     mv "$f" out/$REPO_FOLDER/ || true
           #   done
           # fi
 
-          # Ensure GitHub Pages will serve files that start with underscore
+          # Ensure GitHub Pages will serve files that start with an underscore
           touch out/.nojekyll
-          echo "Prepared out/ for upload. Contents (top-level):"
+          echo "Prepared out/ for upload. Top-level:"
           ls -la out | sed -n '1,200p'
-          echo "If you expected a subfolder (eg out/nextjs-pos-template), ensure basePath in next.config.mjs matches your repo name."
+          echo "If your site expects files under a repo subpath (/nextjs-pos-template/...), ensure basePath in next.config.mjs is correct or enable the wrapping block."
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
