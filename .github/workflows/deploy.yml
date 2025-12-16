@@ -1,5 +1,5 @@
-# Deploy Next.js site to GitHub Pages (handles Next 14+ export layouts)
-name: Deploy Next.js site to Pages
+# .github/workflows/deploy-pages.yml
+name: Deploy Next.js site to GitHub Pages
 
 on:
   push:
@@ -70,18 +70,21 @@ jobs:
           echo "=== .next/output (if any) ==="
           [ -d .next/output ] && ls -la .next/output || echo ".next/output missing"
 
-      - name: Prepare artifact (fix layout to match HTML asset paths)
+      - name: Prepare artifact (assemble, dereference, ensure index at root)
         run: |
           set -euo pipefail
           echo "Preparing export for GitHub Pages..."
 
-          # assemble out/ from common Next outputs if needed (same as before)
+          # Build 'out' from Next outputs if needed
           if [ -d "out" ]; then
             echo "Found existing out/ - using it."
           else
             if [ -d ".next/output/export" ]; then
+              echo "Moving .next/output/export -> out/"
+              rm -rf out
               mv .next/output/export out
             elif [ -d ".next/static" ] || [ -d ".next/server/pages" ] || [ -d ".next/server" ]; then
+              echo "Assembling out/ from .next"
               rm -rf out
               mkdir -p out
               [ -d ".next/static" ] && mkdir -p out/_next && cp -aL .next/static/. out/_next/ || true
@@ -98,72 +101,62 @@ jobs:
             fi
           fi
 
-          # find a candidate index.html produced by the export
-          HTML=$(find out -maxdepth 3 -type f -name index.html | head -n1 || true)
-          if [ -z "$HTML" ]; then
-            echo "No index.html found in out/ — listing out:"
-            ls -la out || true
+          # Create a fully dereferenced copy using rsync -aL into out_clean
+          rm -rf out_clean
+          mkdir -p out_clean
+          echo "Creating dereferenced copy into out_clean (rsync -aL)..."
+          rsync -aL --delete out/ out_clean/
+
+          # If there's no index.html at out_clean root, find one and move its parent dir up
+          if [ ! -f out_clean/index.html ]; then
+            IDX=$(find out_clean -type f -name index.html -print -quit || true)
+            if [ -n "$IDX" ]; then
+              PDIR=$(dirname "$IDX")
+              if [ "$PDIR" != "out_clean" ]; then
+                echo "Found index at $IDX, moving $PDIR/* -> out_clean/"
+                shopt -s dotglob || true
+                for f in "$PDIR"/*; do
+                  mv "$f" out_clean/ || true
+                done
+                # try to remove now-empty directories under out_clean (if any)
+                # this removes only the moved directory if empty
+                rmdir --ignore-fail-on-non-empty "$PDIR" || true
+              fi
+            else
+              echo "ERROR: no index.html found anywhere in out_clean; aborting"
+              find out_clean -maxdepth 3 -ls || true
+              exit 1
+            fi
+          else
+            echo "index.html already at out_clean root"
+          fi
+
+          # verify no symlinks remain
+          SYMLINKS_COUNT=$(find out_clean -type l | wc -l || true)
+          if [ "$SYMLINKS_COUNT" -ne "0" ]; then
+            echo "ERROR: found $SYMLINKS_COUNT symlink(s) in out_clean:"
+            find out_clean -type l -print
             exit 1
           fi
-          echo "Using HTML file: $HTML"
 
-          # detect which asset prefix the HTML expects
-          EXPECTS_REPO_PREFIX=false
-          if grep -q "/nextjs-pos-template/_next" "$HTML"; then
-            EXPECTS_REPO_PREFIX=true
-            echo "HTML references /nextjs-pos-template/_next/"
-          elif grep -q "/_next/" "$HTML"; then
-            EXPECTS_REPO_PREFIX=false
-            echo "HTML references /_next/"
-          else
-            echo "HTML does not reference _next paths in an obvious way; printing first 80 lines:"
-            sed -n '1,80p' "$HTML"
+          # safety size check
+          SIZE_BYTES=$(du -sb out_clean | cut -f1)
+          echo "out_clean size (bytes): $SIZE_BYTES"
+          MAX=$((1024*1024*1024*9))
+          if [ "$SIZE_BYTES" -ge "$MAX" ]; then
+            echo "ERROR: out_clean too large ($SIZE_BYTES bytes). Aborting."
+            exit 1
           fi
 
-          # current disk layout checks
-          HAS_ROOT_NEXT=false
-          HAS_REPO_NEXT=false
-          [ -d "out/_next" ] && HAS_ROOT_NEXT=true
-          [ -d "out/nextjs-pos-template/_next" ] && HAS_REPO_NEXT=true
-          echo "Has out/_next = $HAS_ROOT_NEXT ; Has out/nextjs-pos-template/_next = $HAS_REPO_NEXT"
+          # ensure Pages won't ignore underscored files
+          touch out_clean/.nojekyll
+          echo "Final out_clean top-level:"
+          ls -la out_clean | sed -n '1,200p'
 
-          # If HTML expects repo-prefixed assets but out contains _next at root, wrap out into out/nextjs-pos-template
-          if [ "$EXPECTS_REPO_PREFIX" = "true" ] && [ "$HAS_REPO_NEXT" = "false" ] && [ "$HAS_ROOT_NEXT" = "true" ]; then
-            echo "Wrapping out/ into out/nextjs-pos-template/ so asset paths match HTML..."
-            mkdir -p out/nextjs-pos-template
-            shopt -s dotglob || true
-            for f in out/*; do
-              # skip the folder we just made
-              if [ "$f" = "out/nextjs-pos-template" ]; then continue; fi
-              mv "$f" out/nextjs-pos-template/ || true
-            done
-          fi
-
-          # If HTML expects root _next but files are nested under out/nextjs-pos-template, unwrap them
-          if [ "$EXPECTS_REPO_PREFIX" = "false" ] && [ "$HAS_REPO_NEXT" = "true" ] && [ "$HAS_ROOT_NEXT" = "false" ]; then
-            echo "Unwrapping out/nextjs-pos-template into out/ root so asset paths match HTML..."
-            shopt -s dotglob || true
-            for f in out/nextjs-pos-template/*; do
-              mv "$f" out/ || true
-            done
-            rmdir out/nextjs-pos-template || true
-          fi
-
-          # final check
-          echo "Final out/ top-level:"
-          ls -la out | sed -n '1,200p'
-          echo "Check that the _next folder referenced by HTML exists:"
-          [ -d "out/_next" ] && echo "out/_next exists" || echo "out/_next missing"
-          [ -d "out/nextjs-pos-template/_next" ] && echo "out/nextjs-pos-template/_next exists" || echo "out/nextjs-pos-template/_next missing"
-
-          # create nojekyll
-          touch out/.nojekyll
-      - name: Upload artifact
+      - name: Upload artifact (use upload-pages-artifact)
         uses: actions/upload-pages-artifact@v3
         with:
-          name: github-pages
-          path: out
-          compression-level: 9
+          path: out_clean
 
   deploy:
     environment:
@@ -175,5 +168,3 @@ jobs:
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
-        with:
-          artifact_name: github-pages
